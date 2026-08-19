@@ -1,92 +1,231 @@
-# OpenAI 图像生成 API
+# GPT Image 2 界面资源生成服务
 
-基于 FastAPI 封装 OpenAI 图像模型（默认 `gpt-image-1`）的 REST 服务，支持：
+这是一个可部署的 OpenAI Images API 包装服务，同时提供 REST 和 MCP Streamable HTTP 接口。默认模型为 `gpt-image-2`，适合让 Agent 生成界面插图、背景、纹理、商品图和其他位图资源。
 
-- **文本生成图片**：`POST /v1/images/generate`
-- **文本 + 参考图生成图片**：`POST /v1/images/edit`（multipart 上传）
-- **自定义 BASE_URL**：通过环境变量指向代理、Azure OpenAI 兼容端点或第三方镜像
-- **自定义分辨率**：`size` 字段支持 `auto` 或任意 `宽x高`（例如 `1024x1024`、`1280x720`、`1536x1024`）
+## 能力
 
-> 注：OpenAI 目前的图像模型名为 `gpt-image-1`；若需使用 DALL·E 2 请在 `.env` 中设置 `IMAGE_MODEL=dall-e-2`。
+- `POST /v1/images/generate`：文本生成图片
+- `POST /v1/images/edit`：1-16 张参考图编辑或组合
+- `POST /mcp`：MCP Streamable HTTP，暴露 `generate_ui_asset` 和 `edit_ui_asset`
+- GPT Image 2 自定义尺寸、输出格式、JPEG/WebP 压缩、质量、moderation
+- GPT Image 编辑的 `input_fidelity`
+- 可选阿里云 OSS 持久化；未启用时返回 base64
+- 可选 Bearer 服务密钥、DNS rebinding 防护、单进程限流与并发限制
+- Docker 与反向代理部署
 
-## 快速开始
+## 先读：GPT Image 2 的差异
+
+`gpt-image-2` 的提示词最长 32,000 字符。自定义 `WIDTHxHEIGHT` 的宽和高必须都是 16 的倍数，宽高比需在 1:3 到 3:1 之间，并受 3840x2160 对应的边长和像素上限约束。高于 2560x1440 的尺寸属于实验范围，是否可用仍可能受账号和模型当前限制影响。
+
+`gpt-image-2` 和 `gpt-image-2-2026-04-21` **不支持透明背景**。需要透明 PNG/WebP 时，应显式选择支持透明背景的 GPT Image 模型；本服务会在调用上游前拒绝不兼容的参数组合。
+
+GPT Image 模型始终返回 base64。设置 `OSS_ENABLED=true` 后，服务会把图片上传到 OSS，并用资源 URL 替换响应中的 base64。
+
+## 本地运行
+
+要求 Python 3.11+。
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env       # 编辑 OPENAI_API_KEY，可选 OPENAI_BASE_URL
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cp .env.example .env             # Windows PowerShell: Copy-Item .env.example .env
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-打开交互式文档：http://localhost:8000/docs
+可用地址：
+
+- 服务信息：`http://127.0.0.1:8000/`
+- 健康检查：`http://127.0.0.1:8000/health`
+- OpenAPI：`http://127.0.0.1:8000/docs`
+- MCP：`http://127.0.0.1:8000/mcp`
+
+如果系统设置了 `HTTP_PROXY/HTTPS_PROXY`，请让本机 MCP 地址绕过代理，例如设置 `NO_PROXY=127.0.0.1,localhost`；否则某些 HTTP 客户端会把环回请求错误地发送到外部代理。
 
 ## 环境变量
 
-| 变量名 | 说明 | 默认值 |
-|---|---|---|
-| `OPENAI_API_KEY` | OpenAI API 密钥（必填） | - |
-| `OPENAI_BASE_URL` | 自定义 API 地址（可选） | OpenAI 官方地址 |
-| `IMAGE_MODEL` | 默认图像模型 | `gpt-image-1` |
-| `MAX_UPLOAD_BYTES` | 上传文件大小上限（字节） | `8388608`（8MB） |
-| `REQUEST_TIMEOUT` | 请求超时（秒） | `120` |
+| 变量 | 默认值 | 说明 |
+|---|---:|---|
+| `OPENAI_API_KEY` | 必填 | OpenAI API 密钥，只保存在服务端 |
+| `OPENAI_BASE_URL` | 官方地址 | 可选 OpenAI 兼容网关 `/v1` 地址 |
+| `IMAGE_MODEL` | `gpt-image-2` | 默认图像模型 |
+| `REQUEST_TIMEOUT` | `300` | 上游请求超时，秒 |
+| `MAX_CONCURRENT_GENERATIONS` | `4` | 单进程同时调用上游的上限 |
+| `MAX_UPLOAD_BYTES` | `52428800` | 单张参考图上限，默认 50MB |
+| `MAX_UPLOAD_TOTAL_BYTES` | `52428800` | 一次编辑的参考图总上限 |
+| `MAX_MASK_BYTES` | `4194304` | PNG mask 上限，默认 4MB |
+| `SERVICE_API_KEY` | 空 | REST/MCP 的 Bearer 密钥；公网部署必须设置 |
+| `API_RATE_LIMIT_PER_MINUTE` | `30` | 单进程固定窗口请求数；`0` 关闭 |
+| `MCP_ALLOWED_HOSTS` | 本机 | 逗号分隔的 Host 白名单，支持 `localhost:*` |
+| `MCP_ALLOWED_ORIGINS` | 空 | 逗号分隔的 Origin 白名单 |
+| `MCP_MAX_REQUEST_BODY_BYTES` | `73400320` | MCP JSON 请求体上限 |
+| `OSS_ENABLED` | `false` | 是否把生成结果转存 OSS |
 
-## 接口说明
+完整 OSS 配置见 [.env.example](./.env.example)。
 
-### 1. 文本生成图片 `POST /v1/images/generate`
+## REST API
 
-请求体（JSON）：
+若设置了 `SERVICE_API_KEY`，所有生成/编辑与 MCP 请求都需要：
 
-```json
-{
-  "prompt": "一只穿着宇航服在太空中漂浮的小熊猫，吉卜力工作室风格",
-  "n": 1,
-  "size": "1280x720",
-  "quality": "high",
-  "background": "transparent"
-}
+```http
+Authorization: Bearer YOUR_SERVICE_API_KEY
 ```
 
-字段说明：
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `prompt` | string | 是 | 文本提示词，1-4000 字 |
-| `n` | int | 否 | 生成图片数量，1-10，默认 1 |
-| `size` | string | 否 | `auto` 或 `宽x高`，宽高范围 64-4096 |
-| `quality` | string | 否 | `auto` / `low` / `medium` / `high` / `standard` / `hd` |
-| `background` | string | 否 | `auto` / `transparent` / `opaque` |
-| `model` | string | 否 | 覆盖默认模型 |
-
-### 2. 文本 + 参考图生成 `POST /v1/images/edit`
-
-`multipart/form-data` 表单字段：
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `prompt` | string | 是 | 文本提示词 |
-| `image` | file(s) | 是 | 一张或多张参考图（PNG/JPEG/WebP） |
-| `mask` | file | 否 | PNG 蒙版，透明像素区域将被重新生成 |
-| `n`、`size`、`quality`、`background`、`model` | | 否 | 与文本生成接口一致 |
-
-调用示例：
+### 生成
 
 ```bash
-curl -X POST http://localhost:8000/v1/images/edit \
-  -F "prompt=把天空换成繁星密布的夜空" \
-  -F "image=@./photo.png" \
-  -F "mask=@./mask.png" \
-  -F "size=1280x720"
+curl http://127.0.0.1:8000/v1/images/generate \
+  -H "Authorization: Bearer $IMAGE_SERVICE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "为数据分析产品生成一张安静、清晰的空状态插图，无文字",
+    "size": "1536x864",
+    "quality": "high",
+    "background": "opaque",
+    "output_format": "webp",
+    "output_compression": 85,
+    "moderation": "auto"
+  }'
 ```
 
-### 响应格式
+生成字段：
+
+| 字段 | 约束 |
+|---|---|
+| `prompt` | 必填；GPT Image 最长 32,000 字符 |
+| `n` | 1-10；默认 1 |
+| `size` | `auto` 或 `WIDTHxHEIGHT`；GPT Image 2 见上方约束 |
+| `quality` | GPT Image：`auto/low/medium/high` |
+| `background` | `auto/opaque/transparent`；GPT Image 2 禁止 transparent |
+| `output_format` | GPT Image：`png/jpeg/webp` |
+| `output_compression` | 0-100，仅 `jpeg/webp` |
+| `moderation` | GPT Image：`auto/low` |
+| `user` | 稳定、非敏感的终端用户 ID，用于安全监控 |
+| `model` | 可覆盖服务端默认模型 |
+
+### 多图编辑
+
+重复使用 `image` 字段即可上传多张参考图：
+
+```bash
+curl http://127.0.0.1:8000/v1/images/edit \
+  -H "Authorization: Bearer $IMAGE_SERVICE_API_KEY" \
+  -F "prompt=保留产品外形，把它放入简洁的电商详情页场景，不要添加文字" \
+  -F "image=@product.png" \
+  -F "image=@style-reference.webp" \
+  -F "input_fidelity=high" \
+  -F "size=1536x1024" \
+  -F "quality=high" \
+  -F "output_format=png"
+```
+
+参考图支持 PNG、JPEG、WebP，最多 16 张。`mask` 只能是小于 4MB 的 PNG，透明区域表示需要编辑的位置；mask 会应用到第一张参考图，尺寸一致性由 OpenAI 上游再次校验。
+
+### 响应
 
 ```json
 {
-  "model": "gpt-image-1",
-  "created": 1730000000,
+  "model": "gpt-image-2",
+  "created": 1787100000,
   "images": [
-    { "b64_json": "iVBORw0KGgo...", "url": null, "revised_prompt": null }
-  ]
+    {
+      "b64_json": "iVBORw0KGgo...",
+      "url": null,
+      "mime_type": "image/png",
+      "revised_prompt": null
+    }
+  ],
+  "background": "opaque",
+  "output_format": "png",
+  "quality": "high",
+  "size": "1536x1024",
+  "usage": {
+    "input_tokens": 42,
+    "output_tokens": 4096,
+    "total_tokens": 4138
+  }
 }
 ```
 
-`gpt-image-1` 始终返回 base64；`dall-e-*` 系列可能返回 URL。
+代理返回 SDK 对象、JSON、URL、base64 或常见兼容字段时，服务会尽量归一化成以上结构。不能解析的响应会返回 `502`，而不是伪造成功结果。
+
+## MCP
+
+服务使用官方 Python MCP SDK 2.x，按协商版本提供 Streamable HTTP。当前实现采用 stateless HTTP 和 JSON 响应，工具返回：
+
+- `TextContent`：不含大体积 base64 的 JSON 元数据，兼容旧客户端
+- `ImageContent`：未启用 OSS 时的 base64 图片
+- `ResourceLink`：启用 OSS 或上游返回 URL 时的图片链接
+- `structuredContent`：模型、尺寸、格式、usage 和图片索引
+
+工具：
+
+| 工具 | 用途 |
+|---|---|
+| `generate_ui_asset` | 文本生成 1-10 张界面位图资源 |
+| `edit_ui_asset` | 用 base64/data URL 参考图编辑或组合资源 |
+
+远程 URL 和服务器文件路径不会被 `edit_ui_asset` 接受，这避免了 SSRF 和越权读取服务器文件。远程 MCP 配置示例：
+
+```json
+{
+  "mcpServers": {
+    "gpt-image-2-assets": {
+      "type": "http",
+      "url": "https://image.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_SERVICE_API_KEY"
+      }
+    }
+  }
+}
+```
+
+仓库改造同时会创建一个个人 Codex 插件；插件安装和生产 URL 替换方式见最终交付说明。
+
+## Docker 部署
+
+```bash
+docker build -t gpt-image-2-mcp .
+docker run -d --name gpt-image-2-mcp \
+  --env-file .env \
+  -p 127.0.0.1:8000:8000 \
+  --restart unless-stopped \
+  gpt-image-2-mcp
+```
+
+公网部署时至少完成三件事：
+
+1. 设置高熵 `SERVICE_API_KEY`，不要把 OpenAI 密钥放进 Agent 或插件。
+2. 把实际域名加入 `MCP_ALLOWED_HOSTS`，例如 `image.example.com,localhost:*,127.0.0.1:*`。
+3. 在 TLS 反向代理/API 网关设置统一的主体鉴权、请求体限制、速率限制和审计日志。
+
+Nginx 片段：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_buffering off;
+    proxy_read_timeout 360s;
+    client_max_body_size 70m;
+}
+```
+
+应用内限流是每个 Python 进程各自计数，不能替代多实例网关。Docker 默认只启动一个 worker；横向扩容时应在共享网关限流。面向多租户或第三方公开发布时，静态 Bearer 密钥也不等同于完整 OAuth 授权服务器，应在网关或 MCP OAuth 层完成主体、scope、撤销和轮换。
+
+## API 选择
+
+本服务使用 Images API，而没有把 Responses API 的 `image_generation` 工具包进来。Images API 更适合一次性生成/编辑并直接拿到图片；Responses API 更适合对话上下文中的多轮图像工作流。这个取舍和 MCP 传输决策记录在 [ADR 0001](./docs/adr/0001-images-api-and-mcp-transport.md)，术语见 [glossary](./docs/glossary.md)。
+
+## 官方资料
+
+- [OpenAI Image generation guide](https://developers.openai.com/api/docs/guides/image-generation)
+- [OpenAI GPT Image 2 model](https://developers.openai.com/api/docs/models/gpt-image-2)
+- [MCP 2026-07-28 Tools](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)
+- [MCP 2026-07-28 Transports](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
+- [MCP 2026-07-28 Resources](https://modelcontextprotocol.io/specification/2026-07-28/server/resources)
+
+OpenAI 的模型可用性、配额、计费和高分辨率支持取决于账号与实时发布状态；服务只在本地校验公开参数约束，最终仍以上游响应为准。

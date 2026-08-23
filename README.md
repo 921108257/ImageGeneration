@@ -92,20 +92,20 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `MAX_UPLOAD_BYTES` | `52428800` | 单张参考图上限，默认 50MB |
 | `MAX_UPLOAD_TOTAL_BYTES` | `52428800` | 一次编辑的参考图总上限 |
 | `MAX_MASK_BYTES` | `4194304` | PNG mask 上限，默认 4MB |
-| `SERVICE_API_KEY` | 空 | REST/MCP 的 Bearer 密钥；公网部署必须设置 |
+| `SERVICE_API_KEY` / `API_KEY` | 空 | REST/MCP 的 Bearer 密钥；公网部署必须设置，前者优先 |
 | `API_RATE_LIMIT_PER_MINUTE` | `30` | 单进程固定窗口请求数；`0` 关闭 |
-| `MCP_ALLOWED_HOSTS` | 本机 | 逗号分隔的 Host 白名单，支持 `localhost:*` |
+| `MCP_ALLOWED_HOSTS` / `MCP_HOSTS` | 本机 | 逗号分隔的 Host 白名单，前者优先；支持 `localhost:*` |
 | `MCP_ALLOWED_ORIGINS` | 空 | 逗号分隔的 Origin 白名单 |
 | `MCP_MAX_REQUEST_BODY_BYTES` | `73400320` | MCP JSON 请求体上限 |
 | `OSS_ENABLED` | `false` | 是否把生成结果转存 OSS |
 
-`MCP_ALLOWED_HOSTS` 按 Host 请求头匹配，`*` 本身不是“允许全部”。公网部署应同时配置裸域名和带端口形式，例如 `image.example.com,image.example.com:*,localhost:*,127.0.0.1:*`。变量名必须使用 `MCP_ALLOWED_HOSTS`；服务访问密钥使用 `SERVICE_API_KEY`。
+`MCP_ALLOWED_HOSTS`（或兼容别名 `MCP_HOSTS`）按 Host 请求头匹配，`*` 本身不是“允许全部”。公网部署应同时配置裸域名和带端口形式，例如 `image.example.com,image.example.com:*,localhost:*,127.0.0.1:*`。服务访问密钥使用 `SERVICE_API_KEY`（或兼容别名 `API_KEY`）；若两个变量同时存在，规范变量优先。
 
 完整 OSS 配置见 [.env.example](./.env.example)。
 
 ## REST API
 
-若设置了 `SERVICE_API_KEY`，所有生成/编辑与 MCP 请求都需要：
+若设置了 `SERVICE_API_KEY` 或 `API_KEY`，所有生成/编辑与 MCP 请求都需要：
 
 ```http
 Authorization: Bearer YOUR_SERVICE_API_KEY
@@ -248,8 +248,8 @@ docker run -d --name gpt-image-2-mcp \
 
 公网部署时至少完成三件事：
 
-1. 设置高熵 `SERVICE_API_KEY`，不要把 OpenAI 密钥放进 Agent 或插件。
-2. 把实际域名的裸域名和带端口形式都加入 `MCP_ALLOWED_HOSTS`，例如 `image.example.com,image.example.com:*,localhost:*,127.0.0.1:*`。
+1. 设置高熵 `SERVICE_API_KEY`（`API_KEY` 也兼容），不要把 OpenAI 密钥放进 Agent 或插件。
+2. 把实际域名的裸域名和带端口形式都加入 `MCP_ALLOWED_HOSTS`（`MCP_HOSTS` 也兼容），例如 `image.example.com,image.example.com:*,localhost:*,127.0.0.1:*`。
 3. 在 TLS 反向代理/API 网关设置统一的主体鉴权、请求体限制、速率限制和审计日志。
 
 Nginx 片段：

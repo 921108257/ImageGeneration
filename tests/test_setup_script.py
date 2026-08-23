@@ -19,13 +19,14 @@ class SetupScriptTests(unittest.TestCase):
             with (
                 patch.object(sys, "argv", [str(script)]),
                 patch("builtins.input", return_value="qwen"),
-                patch("getpass.getpass", side_effect=["", "", "qwen-key", ""]),
+                patch("getpass.getpass", side_effect=["", "", "qwen-key", "", "service-key"]),
             ):
                 module.main()
             content = Path(".env").read_text(encoding="utf-8")
         self.assertIn("IMAGE_MODEL=qwen-image-2.0-pro", content)
         self.assertIn("QWEN_API_KEY=qwen-key", content)
         self.assertIn("OPENAI_API_KEY=\n", content)
+        self.assertIn("SERVICE_API_KEY=service-key", content)
 
 
 if __name__ == "__main__":

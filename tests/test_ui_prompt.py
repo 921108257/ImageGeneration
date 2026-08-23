@@ -15,6 +15,7 @@ class UIPromptTests(unittest.TestCase):
         self.assertIn(prompt, enhanced)
         self.assertIn("principal product designer", enhanced)
         self.assertIn("negative space", enhanced)
+        self.assertIn("one readable focal metaphor", enhanced)
         self.assertIn("Do not render words", enhanced)
         self.assertEqual(build_ui_prompt(f"  {prompt}  ", profile="raw"), prompt)
 

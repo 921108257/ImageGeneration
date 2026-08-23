@@ -32,11 +32,17 @@ class Settings(BaseSettings):
     max_upload_total_bytes: int = Field(50 * 1024 * 1024, ge=1)
     max_mask_bytes: int = Field(4 * 1024 * 1024, ge=1)
 
-    service_api_key: str | None = None
+    service_api_key: str | None = Field(
+        None,
+        validation_alias=AliasChoices("SERVICE_API_KEY", "API_KEY"),
+    )
     api_rate_limit_per_minute: int = Field(30, ge=0)
 
     mcp_dns_rebinding_protection: bool = True
-    mcp_allowed_hosts: str = "localhost:*,127.0.0.1:*"
+    mcp_allowed_hosts: str = Field(
+        "localhost:*,127.0.0.1:*",
+        validation_alias=AliasChoices("MCP_ALLOWED_HOSTS", "MCP_HOSTS"),
+    )
     mcp_allowed_origins: str = ""
     mcp_max_request_body_bytes: int = Field(70 * 1024 * 1024, ge=1024)
 

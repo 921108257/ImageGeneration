@@ -29,6 +29,7 @@ def main() -> None:
     small_key = ask("Optional GPT Image 2 <=1K key", secret=True)
     qwen_key = ask("Optional Qwen/DashScope key", secret=True)
     seedream_key = ask("Optional Seedream/Ark key", secret=True)
+    service_key = ask("Optional REST/MCP Bearer service key", secret=True)
     required = {"openai": openai_key, "qwen": qwen_key, "seedream": seedream_key}[provider]
     if not required:
         raise SystemExit(f"{provider} API key is required for the selected default provider")
@@ -48,7 +49,7 @@ def main() -> None:
         "QWEN_IMAGE_MODEL=qwen-image-2.0-pro",
         f"SEEDREAM_API_KEY={seedream_key}",
         "SEEDREAM_IMAGE_MODEL=doubao-seedream-4-0-250828",
-        "SERVICE_API_KEY=",
+        f"SERVICE_API_KEY={service_key}",
         "API_RATE_LIMIT_PER_MINUTE=30",
         "MCP_DNS_REBINDING_PROTECTION=true",
         "MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*,image-gen.xinlanzi.com,image-gen.xinlanzi.com:*",

@@ -59,7 +59,15 @@ def configured_models(settings=None) -> list[dict]:
     for model, provider, default in candidates:
         if any(item["id"] == model for item in models) or not default and not credentials[provider]:
             continue
-        models.append({"id": model, "provider": provider, "default": default, "configured": credentials[provider]})
+        models.append(
+            {
+                "id": model,
+                "provider": provider,
+                "default": default,
+                "configured": credentials[provider],
+                "capabilities": ["generate", "edit"] if provider == "openai" else ["generate"],
+            }
+        )
     return models
 
 

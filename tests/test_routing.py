@@ -1,7 +1,7 @@
 import unittest
 
 from app.config import Settings
-from app.openai_client import provider_for_model, resolve_api_key, resolve_base_url, uses_small_image_key
+from app.openai_client import configured_models, provider_for_model, resolve_api_key, resolve_base_url, uses_small_image_key
 from app.schemas import validate_size
 
 
@@ -37,6 +37,12 @@ class ProviderRoutingTests(unittest.TestCase):
                 self.assertEqual(provider_for_model(model, self.settings), provider)
                 self.assertEqual(resolve_api_key(model, "1024x1024", self.settings), key)
                 self.assertEqual(resolve_base_url(model, self.settings), base_url)
+
+    def test_model_listing_exposes_provider_capabilities(self) -> None:
+        models = {item["provider"]: item for item in configured_models(self.settings)}
+        self.assertEqual(models["openai"]["capabilities"], ["generate", "edit"])
+        self.assertEqual(models["qwen"]["capabilities"], ["generate"])
+        self.assertEqual(models["seedream"]["capabilities"], ["generate"])
 
     def test_accepts_seedream_size_presets(self) -> None:
         self.assertEqual(validate_size("2K", "doubao-seedream-4-0-250828"), "2K")

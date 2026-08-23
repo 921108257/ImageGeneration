@@ -209,7 +209,7 @@ curl http://127.0.0.1:8000/v1/images/edit \
 
 | 工具 | 用途 |
 |---|---|
-| `list_ui_models` | 查看已配置提供商和模型，不调用上游 |
+| `list_ui_models` | 查看已配置提供商、模型及 generate/edit 能力，不调用上游 |
 | `generate_ui_asset` | 文本生成 1-10 张界面位图资源 |
 | `edit_ui_asset` | 用 base64/data URL 参考图编辑或组合资源 |
 

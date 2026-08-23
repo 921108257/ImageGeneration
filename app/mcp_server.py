@@ -10,20 +10,21 @@ from pydantic import Field, ValidationError
 
 from .config import get_settings
 from .image_service import decode_image_input, edit_images, generate_images
-from .openai_client import get_client
+from .openai_client import configured_models, get_client
 from .schemas import GenerateRequest, ImageResponse
 
 
 settings = get_settings()
 mcp = MCPServer(
     name="gpt-image-2-assets",
-    title="GPT Image 2 UI Assets",
-    description="Generate and edit interface image assets with the OpenAI Images API.",
+    title="Professional UI Image Assets",
+    description="Generate production-ready interface assets with GPT Image 2, Qwen Image, or Seedream.",
     instructions=(
-        "Use generate_ui_asset for new UI assets. GPT Image 2 does not support transparent "
-        "backgrounds; request opaque/auto or explicitly choose a compatible GPT Image model."
+        "Use list_ui_models before choosing a non-default provider. Use prompt_profile=ui_pro for "
+        "production UI assets and raw only when the caller already supplies a complete art-direction brief. "
+        "GPT Image 2 does not support transparent backgrounds. Save provider URLs into the target project."
     ),
-    version="2.0.0",
+    version="3.0.0",
 )
 
 _TOOL_ANNOTATIONS = types.ToolAnnotations(
@@ -34,9 +35,30 @@ _TOOL_ANNOTATIONS = types.ToolAnnotations(
 )
 
 
+@mcp.tool(
+    name="list_ui_models",
+    title="List UI image models",
+    description="List configured image providers and models without making an upstream request.",
+    annotations=types.ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    structured_output=False,
+)
+async def list_ui_models() -> types.CallToolResult:
+    payload = {
+        "models": configured_models(settings),
+        "small_image_key_enabled": bool(settings.openai_api_key_1k),
+    }
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
+        structuredContent=payload,
+        isError=False,
+    )
+
+
 def _result_metadata(response: ImageResponse) -> dict:
     return {
         "model": response.model,
+        "provider": response.provider,
+        "prompt_profile": response.prompt_profile,
         "created": response.created,
         "background": response.background,
         "output_format": response.output_format,
@@ -104,8 +126,8 @@ def _tool_error(exc: Exception) -> types.CallToolResult:
     name="generate_ui_asset",
     title="Generate UI asset",
     description=(
-        "Generate one or more interface image assets. Supports GPT Image 2 arbitrary WIDTHxHEIGHT "
-        "sizes whose edges are divisible by 16. PNG is lossless; JPEG/WebP support compression."
+        "Generate one or more production-ready interface assets with professional UI prompt expansion. "
+        "Supports configured GPT Image 2, Qwen Image, and Seedream providers."
     ),
     annotations=_TOOL_ANNOTATIONS,
     structured_output=False,
@@ -119,9 +141,21 @@ async def generate_ui_asset(
     background: Literal["auto", "transparent", "opaque"] | None = None,
     output_format: Literal["png", "jpeg", "webp"] = "png",
     output_compression: Annotated[int | None, Field(ge=0, le=100)] = None,
-    moderation: Literal["auto", "low"] | None = "auto",
+    moderation: Literal["auto", "low"] | None = None,
     user: Annotated[str | None, Field(max_length=256)] = None,
     model: str | None = None,
+    prompt_profile: Literal["ui_pro", "raw"] = "ui_pro",
+    asset_type: Literal["auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "avatar", "pattern"] = "auto",
+    platform: Literal["web", "mobile", "desktop", "cross_platform"] = "web",
+    visual_style: str | None = None,
+    brand_palette: str | None = None,
+    composition: str | None = None,
+    content_density: Literal["airy", "balanced", "dense"] = "balanced",
+    text_policy: Literal["no_text", "minimal_text", "exact_text"] = "no_text",
+    negative_prompt: str | None = None,
+    prompt_extend: bool | None = None,
+    watermark: bool | None = None,
+    seed: Annotated[int | None, Field(ge=0, le=2147483647)] = None,
 ) -> types.CallToolResult:
     await ctx.report_progress(0.05, 1, "正在提交图像生成请求")
     try:
@@ -136,9 +170,22 @@ async def generate_ui_asset(
             moderation=moderation,
             user=user,
             model=model,
+            prompt_profile=prompt_profile,
+            asset_type=asset_type,
+            platform=platform,
+            visual_style=visual_style,
+            brand_palette=brand_palette,
+            composition=composition,
+            content_density=content_density,
+            text_policy=text_policy,
+            negative_prompt=negative_prompt,
+            prompt_extend=prompt_extend,
+            watermark=watermark,
+            seed=seed,
         )
-        response = await generate_images(get_client(), settings, request)
-    except (APIError, ValidationError, ValueError) as exc:
+        resolved_model = request.model or settings.image_model
+        response = await generate_images(get_client(resolved_model, request.size), settings, request)
+    except Exception as exc:
         return _tool_error(exc)
     await ctx.report_progress(1, 1, "图像生成完成")
     return _tool_result(response)
@@ -168,6 +215,14 @@ async def edit_ui_asset(
     input_fidelity: Literal["low", "high"] | None = None,
     user: Annotated[str | None, Field(max_length=256)] = None,
     model: str | None = None,
+    prompt_profile: Literal["ui_pro", "raw"] = "ui_pro",
+    asset_type: Literal["auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "avatar", "pattern"] = "auto",
+    platform: Literal["web", "mobile", "desktop", "cross_platform"] = "web",
+    visual_style: str | None = None,
+    brand_palette: str | None = None,
+    composition: str | None = None,
+    content_density: Literal["airy", "balanced", "dense"] = "balanced",
+    text_policy: Literal["no_text", "minimal_text", "exact_text"] = "no_text",
 ) -> types.CallToolResult:
     await ctx.report_progress(0.05, 1, "正在校验参考图")
     try:
@@ -178,7 +233,7 @@ async def edit_ui_asset(
         if decoded_mask is not None and not decoded_mask.name.endswith(".png"):
             raise ValueError("mask 必须是 PNG 图片")
         response = await edit_images(
-            get_client(),
+            get_client(model or settings.image_model, size),
             settings,
             prompt=prompt,
             images=decoded,
@@ -192,8 +247,16 @@ async def edit_ui_asset(
             input_fidelity=input_fidelity,
             user=user,
             model=model,
+            prompt_profile=prompt_profile,
+            asset_type=asset_type,
+            platform=platform,
+            visual_style=visual_style,
+            brand_palette=brand_palette,
+            composition=composition,
+            content_density=content_density,
+            text_policy=text_policy,
         )
-    except (APIError, ValidationError, ValueError) as exc:
+    except Exception as exc:
         return _tool_error(exc)
     await ctx.report_progress(1, 1, "图像编辑完成")
     return _tool_result(response)

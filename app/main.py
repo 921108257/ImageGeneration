@@ -4,13 +4,14 @@ import traceback
 from contextlib import asynccontextmanager
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
-from openai import APIConnectionError, APIError, AsyncOpenAI, BadRequestError, RateLimitError
+from openai import APIConnectionError, APIError, BadRequestError, RateLimitError
 
 from .config import Settings, get_settings
 from .image_service import detect_image_mime, edit_images, generate_images, named_image
 from .mcp_server import mcp_http_app
-from .openai_client import get_client
+from .openai_client import configured_models, get_client
 from .schemas import (
     GenerateRequest,
     ImageBackground,
@@ -20,6 +21,7 @@ from .schemas import (
     InputFidelity,
 )
 from .security import RequestGuardMiddleware
+from .ui_prompt import ContentDensity, PromptProfile, TextPolicy, UIAssetType, UIPlatform
 
 logger = logging.getLogger("image_api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -32,14 +34,14 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="GPT Image 2 图像生成服务",
+    title="专业 UI 多模型图像生成服务",
     description=(
-        "面向界面资源生成的 OpenAI Images API 与 MCP 服务。\n\n"
+        "面向界面资源生成的多模型 Images API 与 MCP 服务。\n\n"
         "- REST 生成：`POST /v1/images/generate`\n"
         "- REST 多图编辑：`POST /v1/images/edit`\n"
         "- MCP Streamable HTTP：`POST /mcp`"
     ),
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 app.add_middleware(RequestGuardMiddleware)
@@ -97,6 +99,8 @@ def _map_openai_error(exc: Exception, model: str | None = None) -> HTTPException
         return HTTPException(status_code=429, detail=detail)
     if isinstance(exc, APIConnectionError):
         return HTTPException(status_code=502, detail=detail)
+    if isinstance(exc, httpx.HTTPStatusError):
+        return HTTPException(status_code=exc.response.status_code, detail=detail)
     if isinstance(exc, APIError):
         upstream_status = getattr(exc, "status_code", None)
         code = upstream_status if isinstance(upstream_status, int) and 400 <= upstream_status < 600 else 502
@@ -127,7 +131,18 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict:
         "model": settings.image_model,
         "mcp_endpoint": "/mcp",
         "authentication_enabled": bool(settings.service_api_key),
+        "providers": {
+            "openai": bool(settings.openai_api_key),
+            "openai_1k": bool(settings.openai_api_key_1k),
+            "qwen": bool(settings.qwen_api_key),
+            "seedream": bool(settings.seedream_api_key),
+        },
     }
+
+
+@app.get("/v1/models", summary="可用图像模型")
+async def models(settings: Annotated[Settings, Depends(get_settings)]) -> dict:
+    return {"data": configured_models(settings)}
 
 
 @app.post(
@@ -141,12 +156,11 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict:
 )
 async def generate_image(
     body: GenerateRequest,
-    client: Annotated[AsyncOpenAI, Depends(get_client)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ImageResponse:
     model = body.model or settings.image_model
     try:
-        return await generate_images(client, settings, body)
+        return await generate_images(get_client(model, body.size), settings, body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -162,7 +176,6 @@ async def generate_image(
 async def edit_image(
     prompt: Annotated[str, Form(min_length=1, max_length=32000, description="文本提示词")],
     image: Annotated[list[UploadFile], File(description="1-16 张参考图，重复使用 image 字段")],
-    client: Annotated[AsyncOpenAI, Depends(get_client)],
     settings: Annotated[Settings, Depends(get_settings)],
     mask: Annotated[UploadFile | None, File(description="可选 PNG 蒙版")] = None,
     n: Annotated[int, Form(ge=1, le=10)] = 1,
@@ -174,6 +187,14 @@ async def edit_image(
     input_fidelity: Annotated[InputFidelity | None, Form()] = None,
     user: Annotated[str | None, Form(max_length=256)] = None,
     model: Annotated[str | None, Form()] = None,
+    prompt_profile: Annotated[PromptProfile, Form()] = "ui_pro",
+    asset_type: Annotated[UIAssetType, Form()] = "auto",
+    platform: Annotated[UIPlatform, Form()] = "web",
+    visual_style: Annotated[str | None, Form()] = None,
+    brand_palette: Annotated[str | None, Form()] = None,
+    composition: Annotated[str | None, Form()] = None,
+    content_density: Annotated[ContentDensity, Form()] = "balanced",
+    text_policy: Annotated[TextPolicy, Form()] = "no_text",
 ) -> ImageResponse:
     if not 1 <= len(image) <= 16:
         raise HTTPException(status_code=400, detail="image 必须包含 1 到 16 张参考图")
@@ -196,7 +217,7 @@ async def edit_image(
     resolved_model = _normalize_optional(model) or settings.image_model
     try:
         return await edit_images(
-            client,
+            get_client(resolved_model, size),
             settings,
             prompt=prompt,
             images=image_buffers,
@@ -210,6 +231,14 @@ async def edit_image(
             input_fidelity=input_fidelity,
             user=_normalize_optional(user),
             model=resolved_model,
+            prompt_profile=prompt_profile,
+            asset_type=asset_type,
+            platform=platform,
+            visual_style=visual_style,
+            brand_palette=brand_palette,
+            composition=composition,
+            content_density=content_density,
+            text_policy=text_policy,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

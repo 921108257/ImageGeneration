@@ -10,7 +10,7 @@ ImageOutputFormat = Literal["png", "jpeg", "webp"]
 ImageModeration = Literal["auto", "low"]
 InputFidelity = Literal["low", "high"]
 
-_SIZE_PATTERN = re.compile(r"^([1-9]\d{0,4})x([1-9]\d{0,4})$")
+_SIZE_PATTERN = re.compile(r"^([1-9]\d{0,4})([x*])([1-9]\d{0,4})$")
 _GPT_IMAGE_2_MODELS = {"gpt-image-2", "gpt-image-2-2026-04-21"}
 _GPT_IMAGE_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536"}
 _DALLE_2_SIZES = {"256x256", "512x512", "1024x1024"}
@@ -25,18 +25,39 @@ def is_gpt_image_2_model(model: str) -> bool:
     return model in _GPT_IMAGE_2_MODELS
 
 
+def is_qwen_model(model: str) -> bool:
+    return model.lower().startswith("qwen-image")
+
+
+def is_seedream_model(model: str) -> bool:
+    lowered = model.lower()
+    return lowered.startswith("seedream") or lowered.startswith("doubao-seedream")
+
+
+def parse_size(size: str) -> tuple[int, int] | None:
+    if size == "auto":
+        return None
+    match = _SIZE_PATTERN.fullmatch(size)
+    return (int(match.group(1)), int(match.group(3))) if match else None
+
+
 def validate_size(size: str, model: str) -> str:
     if size == "auto":
         if model in {"dall-e-2", "dall-e-3"}:
             raise ValueError(f"{model} 不支持 size=auto")
         return size
 
+    if is_seedream_model(model) and size.upper() in {"1K", "2K", "4K"}:
+        return size.upper()
+
     match = _SIZE_PATTERN.fullmatch(size)
     if not match:
         raise ValueError("size 应为 auto 或 WIDTHxHEIGHT，例如 1536x864")
+    if match.group(2) == "*" and not is_qwen_model(model):
+        raise ValueError("除 Qwen 外的模型请使用 WIDTHxHEIGHT 尺寸格式")
 
     if is_gpt_image_2_model(model):
-        width, height = map(int, match.groups())
+        width, height = int(match.group(1)), int(match.group(3))
         short_edge, long_edge = sorted((width, height))
         ratio = width / height
         if width % 16 or height % 16:
@@ -58,7 +79,7 @@ def validate_size(size: str, model: str) -> str:
         raise ValueError(f"{model} 的 size 仅支持: {', '.join(sorted(allowed))}")
 
     # Unknown model names are commonly used by OpenAI-compatible gateways.
-    width, height = map(int, match.groups())
+    width, height = int(match.group(1)), int(match.group(3))
     if not (64 <= width <= 4096 and 64 <= height <= 4096):
         raise ValueError("兼容模型的宽和高必须在 64 到 4096 之间")
     return size
@@ -78,7 +99,7 @@ def validate_image_options(
     editing: bool = False,
     input_fidelity: InputFidelity | None = None,
 ) -> None:
-    prompt_limit = 1000 if model == "dall-e-2" else 4000 if model == "dall-e-3" else 32000
+    prompt_limit = 1000 if model == "dall-e-2" else 4000 if model == "dall-e-3" else 5200 if is_qwen_model(model) else 32000
     if not prompt.strip():
         raise ValueError("prompt 不能为空")
     if len(prompt) > prompt_limit:
@@ -87,6 +108,15 @@ def validate_image_options(
         raise ValueError("dall-e-3 仅支持 n=1")
     if editing and model == "dall-e-3":
         raise ValueError("dall-e-3 不支持 Images API 编辑接口")
+
+    if is_qwen_model(model):
+        dimensions = parse_size(size)
+        if dimensions is not None:
+            width, height = dimensions
+            if width * height < 512 * 512 or width * height > 2048 * 2048:
+                raise ValueError("Qwen Image 的总像素需在 512x512 到 2048x2048 之间")
+        if n > 6:
+            raise ValueError("Qwen Image 单次最多生成 6 张图片")
 
     validate_size(size, model)
 
@@ -124,6 +154,20 @@ class GenerateRequest(BaseModel):
     user: str | None = Field(None, max_length=256, description="稳定的终端用户标识")
     style: Literal["vivid", "natural"] | None = Field(None, description="仅用于 dall-e-3")
     model: str | None = Field(None, min_length=1, description="覆盖默认图像模型")
+    prompt_profile: Literal["ui_pro", "raw"] = Field("ui_pro", description="专业 UI 提示词增强或原始模式")
+    asset_type: Literal[
+        "auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "avatar", "pattern"
+    ] = Field("auto", description="前端资产类型")
+    platform: Literal["web", "mobile", "desktop", "cross_platform"] = Field("web", description="目标平台")
+    visual_style: str | None = Field(None, max_length=1000, description="视觉风格")
+    brand_palette: str | None = Field(None, max_length=1000, description="品牌色与材质方向")
+    composition: str | None = Field(None, max_length=2000, description="构图与留白要求")
+    content_density: Literal["airy", "balanced", "dense"] = Field("balanced", description="内容密度")
+    text_policy: Literal["no_text", "minimal_text", "exact_text"] = Field("no_text", description="文字渲染策略")
+    negative_prompt: str | None = Field(None, max_length=500, description="Qwen/兼容模型的反向提示词")
+    prompt_extend: bool | None = Field(None, description="Qwen 模型是否启用提示词扩展")
+    watermark: bool | None = Field(None, description="Qwen 模型是否添加水印")
+    seed: int | None = Field(None, ge=0, le=2147483647, description="兼容模型的随机种子")
 
 
 class ImageItem(BaseModel):
@@ -135,6 +179,8 @@ class ImageItem(BaseModel):
 
 class ImageResponse(BaseModel):
     model: str = Field(..., description="实际使用的模型名称")
+    provider: str = Field("openai", description="实际使用的上游提供商")
+    prompt_profile: str = Field("raw", description="实际使用的提示词模式")
     created: int = Field(..., description="生成时间戳（Unix 秒）")
     images: list[ImageItem] = Field(..., description="生成的图片列表")
     background: str | None = None

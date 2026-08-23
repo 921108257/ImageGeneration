@@ -41,7 +41,7 @@ class McpProtocolTests(unittest.IsolatedAsyncioTestCase):
             result = await client.list_tools()
         self.assertEqual(
             [tool.name for tool in result.tools],
-            ["generate_ui_asset", "edit_ui_asset"],
+            ["list_ui_models", "generate_ui_asset", "edit_ui_asset"],
         )
 
     async def test_generate_tool_returns_standard_image_content(self) -> None:

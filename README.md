@@ -1,13 +1,17 @@
 # GPT Image 2 界面资源生成服务
 
-这是一个可部署的 OpenAI Images API 包装服务，同时提供 REST 和 MCP Streamable HTTP 接口。默认模型为 `gpt-image-2`，适合让 Agent 生成界面插图、背景、纹理、商品图和其他位图资源。
+这是一个可本地或服务器部署的多模型图像资源服务，同时提供 REST、MCP Streamable HTTP、Codex Plugin 和前端资产 Skill。默认模型为 `gpt-image-2`，面向前端工程师生成可直接落地的 UI 背景、插图、图标、纹理、产品 mockup 和其他位图资源。
 
 ## 能力
 
 - `POST /v1/images/generate`：文本生成图片
 - `POST /v1/images/edit`：1-16 张参考图编辑或组合
 - `POST /mcp`：MCP Streamable HTTP，暴露 `generate_ui_asset` 和 `edit_ui_asset`
+- `GET /v1/models`：查看已配置的模型提供商
 - GPT Image 2 自定义尺寸、输出格式、JPEG/WebP 压缩、质量、moderation
+- GPT Image 2 1K 专用 Key 路由：存在 `OPENAI_API_KEY_1K` 时，明确指定不超过 `IMAGE_1K_MAX_EDGE` 的请求优先使用它，否则回退默认 OpenAI Key
+- Qwen Image 原生 DashScope 生成适配、Seedream Ark OpenAI 兼容适配
+- `prompt_profile=ui_pro`：把短需求扩展为包含层级、留白、材质、灯光和集成约束的专业 UI 资产 brief
 - GPT Image 编辑的 `input_fidelity`
 - 可选阿里云 OSS 持久化；未启用时返回 base64
 - 可选 Bearer 服务密钥、DNS rebinding 防护、单进程限流与并发限制
@@ -23,7 +27,33 @@ GPT Image 模型始终返回 base64。设置 `OSS_ENABLED=true` 后，服务会�
 
 ## 本地运行
 
-要求 Python 3.11+。
+要求 Python 3.11+。最简单的方式是运行一键向导：
+
+```powershell
+.\scripts\setup.ps1
+.\scripts\start.ps1
+```
+
+macOS/Linux：
+
+```bash
+./scripts/setup.sh
+./scripts/start.sh
+```
+
+向导会隐藏输入的密钥、写入被 Git 忽略的 `.env`，并默认只监听 `127.0.0.1:8000`。也可以直接使用 Docker：
+
+```bash
+docker compose up --build
+```
+
+安装本地 Codex Plugin：
+
+```powershell
+.\scripts\install_codex.ps1
+```
+
+需要拆分透明图标 sheet 时再安装可选资产依赖：`pip install -r requirements-assets.txt`。普通生成服务不需要 Pillow 或 `rembg`。
 
 ```bash
 python -m venv .venv
@@ -46,9 +76,17 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 | 变量 | 默认值 | 说明 |
 |---|---:|---|
-| `OPENAI_API_KEY` | 必填 | OpenAI API 密钥，只保存在服务端 |
+| `OPENAI_API_KEY` | 按需 | 使用 OpenAI/GPT Image 时必填，只保存在服务端 |
 | `OPENAI_BASE_URL` | 官方地址 | 可选 OpenAI 兼容网关 `/v1` 地址 |
+| `OPENAI_API_KEY_1K` | 空 | GPT Image 2 不超过 `IMAGE_1K_MAX_EDGE` 时优先使用；未设置则回退 `OPENAI_API_KEY` |
+| `IMAGE_1K_MAX_EDGE` | `1024` | 小图专用 Key 的最长边阈值 |
 | `IMAGE_MODEL` | `gpt-image-2` | 默认图像模型 |
+| `QWEN_API_KEY` / `DASHSCOPE_API_KEY` | 空 | Qwen Image Key |
+| `QWEN_BASE_URL` | DashScope 原生接口 | Qwen 图像生成 URL |
+| `QWEN_IMAGE_MODEL` | `qwen-image-2.0-pro` | 默认 Qwen 图像模型 |
+| `SEEDREAM_API_KEY` / `VOLCENGINE_API_KEY` | 空 | Seedream/Ark Key |
+| `SEEDREAM_BASE_URL` | Ark 北京 API | Seedream OpenAI 兼容根地址 |
+| `SEEDREAM_IMAGE_MODEL` | `doubao-seedream-4-0-250828` | 默认 Seedream 模型 ID |
 | `REQUEST_TIMEOUT` | `300` | 上游请求超时，秒 |
 | `MAX_CONCURRENT_GENERATIONS` | `4` | 单进程同时调用上游的上限 |
 | `MAX_UPLOAD_BYTES` | `52428800` | 单张参考图上限，默认 50MB |
@@ -60,6 +98,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `MCP_ALLOWED_ORIGINS` | 空 | 逗号分隔的 Origin 白名单 |
 | `MCP_MAX_REQUEST_BODY_BYTES` | `73400320` | MCP JSON 请求体上限 |
 | `OSS_ENABLED` | `false` | 是否把生成结果转存 OSS |
+
+`MCP_ALLOWED_HOSTS` 按 Host 请求头匹配，`*` 本身不是“允许全部”。公网部署应同时配置裸域名和带端口形式，例如 `image.example.com,image.example.com:*,localhost:*,127.0.0.1:*`。变量名必须使用 `MCP_ALLOWED_HOSTS`；服务访问密钥使用 `SERVICE_API_KEY`。
 
 完整 OSS 配置见 [.env.example](./.env.example)。
 
@@ -102,6 +142,13 @@ curl http://127.0.0.1:8000/v1/images/generate \
 | `moderation` | GPT Image：`auto/low` |
 | `user` | 稳定、非敏感的终端用户 ID，用于安全监控 |
 | `model` | 可覆盖服务端默认模型 |
+| `prompt_profile` | `ui_pro` 或 `raw`；默认把短需求扩展为专业 UI 资产 brief |
+| `asset_type` | `hero_background/empty_state/illustration/icon/logo/texture/product_mockup/avatar/pattern` |
+| `platform` | `web/mobile/desktop/cross_platform` |
+| `visual_style` / `brand_palette` / `composition` | 可选视觉系统、材质和构图约束 |
+| `content_density` | `airy/balanced/dense` |
+| `text_policy` | `no_text/minimal_text/exact_text` |
+| `negative_prompt` / `prompt_extend` / `watermark` / `seed` | Qwen/兼容模型的扩展参数 |
 
 ### 多图编辑
 
@@ -162,8 +209,13 @@ curl http://127.0.0.1:8000/v1/images/edit \
 
 | 工具 | 用途 |
 |---|---|
+| `list_ui_models` | 查看已配置提供商和模型，不调用上游 |
 | `generate_ui_asset` | 文本生成 1-10 张界面位图资源 |
 | `edit_ui_asset` | 用 base64/data URL 参考图编辑或组合资源 |
+
+### 前端产出工作流
+
+插件内的 [gpt-image-2-assets Skill](./plugins/gpt-image-2-assets/skills/gpt-image-2-assets/SKILL.md) 负责把产品上下文、平台、资产类型、留白、材质和文字策略组织成可执行的提示词。它要求生成结果落盘到前端项目，不把短期 Provider URL 留作运行时依赖；图标还要经过 `rembg` 去底并校验 RGBA alpha。`ui-ux-asset-pipeline` 可进一步用 `split_icon_sheet.py` 拆分一致的图标族。
 
 远程 URL 和服务器文件路径不会被 `edit_ui_asset` 接受，这避免了 SSRF 和越权读取服务器文件。远程 MCP 配置示例：
 
@@ -181,7 +233,7 @@ curl http://127.0.0.1:8000/v1/images/edit \
 }
 ```
 
-仓库改造同时会创建一个个人 Codex 插件；插件安装和生产 URL 替换方式见最终交付说明。
+仓库中的 `plugins/gpt-image-2-assets` 是可安装的本地 Plugin，默认连接本机 MCP。部署到服务器后，把它的 `.mcp.json` 替换为 `plugins/gpt-image-2-assets/.mcp.remote.example.json` 的远程 URL，并配置 `GPT_IMAGE_2_SERVICE_API_KEY` 环境变量。
 
 ## Docker 部署
 
@@ -197,7 +249,7 @@ docker run -d --name gpt-image-2-mcp \
 公网部署时至少完成三件事：
 
 1. 设置高熵 `SERVICE_API_KEY`，不要把 OpenAI 密钥放进 Agent 或插件。
-2. 把实际域名加入 `MCP_ALLOWED_HOSTS`，例如 `image.example.com,localhost:*,127.0.0.1:*`。
+2. 把实际域名的裸域名和带端口形式都加入 `MCP_ALLOWED_HOSTS`，例如 `image.example.com,image.example.com:*,localhost:*,127.0.0.1:*`。
 3. 在 TLS 反向代理/API 网关设置统一的主体鉴权、请求体限制、速率限制和审计日志。
 
 Nginx 片段：
@@ -224,8 +276,16 @@ location / {
 
 - [OpenAI Image generation guide](https://developers.openai.com/api/docs/guides/image-generation)
 - [OpenAI GPT Image 2 model](https://developers.openai.com/api/docs/models/gpt-image-2)
+- [Alibaba Cloud Qwen Image API](https://help.aliyun.com/zh/model-studio/qwen-image-api)
+- [Volcengine Ark documentation](https://www.volcengine.com/docs/82379)
 - [MCP 2026-07-28 Tools](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)
 - [MCP 2026-07-28 Transports](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
 - [MCP 2026-07-28 Resources](https://modelcontextprotocol.io/specification/2026-07-28/server/resources)
 
 OpenAI 的模型可用性、配额、计费和高分辨率支持取决于账号与实时发布状态；服务只在本地校验公开参数约束，最终仍以上游响应为准。
+
+## 开源发布清单
+
+- 不提交 `.env`、API Key、OSS 密钥或生成结果；`.gitignore` 已覆盖本地密钥文件。
+- 运行 `python -m unittest discover -s tests -v`、插件校验和 Skill 校验。
+- 用 `git grep` 检查仓库中没有真实凭据，再提交并推送到你的 GitHub 仓库。

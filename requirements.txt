@@ -1,6 +1,7 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.31,<1
 openai>=2.48,<4
+httpx>=0.28,<1
 mcp>=2,<3
 python-multipart>=0.0.9,<1
 pydantic>=2.12,<3

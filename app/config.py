@@ -1,13 +1,30 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    openai_api_key: str = Field(min_length=1)
+    openai_api_key: str | None = Field(None, validation_alias=AliasChoices("OPENAI_API_KEY"))
     openai_base_url: str | None = None
+    openai_api_key_1k: str | None = Field(
+        None,
+        validation_alias=AliasChoices("OPENAI_API_KEY_1K", "GPT_IMAGE_2_1K_API_KEY"),
+    )
+    image_1k_max_edge: int = Field(1024, ge=64, le=4096)
     image_model: str = "gpt-image-2"
+    qwen_api_key: str | None = Field(
+        None,
+        validation_alias=AliasChoices("QWEN_API_KEY", "DASHSCOPE_API_KEY"),
+    )
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+    qwen_image_model: str = "qwen-image-2.0-pro"
+    seedream_api_key: str | None = Field(
+        None,
+        validation_alias=AliasChoices("SEEDREAM_API_KEY", "VOLCENGINE_API_KEY", "ARK_API_KEY"),
+    )
+    seedream_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    seedream_image_model: str = "doubao-seedream-4-0-250828"
     request_timeout: float = Field(300.0, gt=0)
     max_concurrent_generations: int = Field(4, ge=1, le=64)
 

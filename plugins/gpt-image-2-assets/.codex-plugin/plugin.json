@@ -1,0 +1,24 @@
+{
+  "name": "gpt-image-2-assets",
+  "version": "0.2.0",
+  "description": "Professional UI asset generation through a local or hosted multi-model MCP service.",
+  "author": {
+    "name": "ImageGeneration contributors"
+  },
+  "license": "MIT",
+  "keywords": ["ui", "frontend", "image-generation", "gpt-image-2", "qwen", "seedream", "mcp"],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "GPT Image 2 Assets",
+    "shortDescription": "Generate production-ready UI assets.",
+    "longDescription": "Connects Codex to a local or hosted MCP image service with professional UI prompting, GPT Image 2, Qwen Image, and Seedream model routing.",
+    "developerName": "ImageGeneration contributors",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Use the UI asset skill to create a polished empty-state illustration.",
+      "Generate a responsive hero background with quiet space for product copy.",
+      "Create a coherent icon family for this frontend feature."
+    ]
+  }
+}

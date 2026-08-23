@@ -15,3 +15,6 @@
 | DNS rebinding protection | MCP HTTP 层对 Host/Origin 的白名单校验 |
 | 服务密钥 | `SERVICE_API_KEY`；调用方使用 Bearer 令牌访问 REST/MCP，不是 OpenAI API key |
 | 上游 | OpenAI 官方 API 或 `OPENAI_BASE_URL` 指定的兼容服务 |
+| provider | 实际提供图像能力的 OpenAI、Qwen/DashScope 或 Seedream/Ark 服务 |
+| 小图专用 Key | GPT Image 2 显式尺寸两边均不超过阈值时使用的 `OPENAI_API_KEY_1K` |
+| UI Pro | 默认提示词配置；把产品 brief 补全为包含层级、构图、留白、材质、光照和文字策略的专业资产 brief |

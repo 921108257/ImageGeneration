@@ -7,11 +7,22 @@ import time
 from functools import lru_cache
 from typing import Any
 
+import httpx
 from openai import AsyncOpenAI
 
 from .config import Settings
+from .openai_client import provider_for_model
 from .oss_client import upload_image_bytes
-from .schemas import GenerateRequest, ImageItem, ImageResponse, is_gpt_image_model, validate_image_options
+from .schemas import (
+    GenerateRequest,
+    ImageItem,
+    ImageResponse,
+    is_gpt_image_model,
+    is_qwen_model,
+    is_seedream_model,
+    validate_image_options,
+)
+from .ui_prompt import ContentDensity, PromptProfile, TextPolicy, UIAssetType, UIPlatform, build_ui_prompt
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -102,6 +113,7 @@ async def to_image_response(
     result: Any,
     settings: Settings,
     requested_format: str | None = None,
+    prompt_profile: str = "raw",
 ) -> ImageResponse:
     payload = _normalize_result(result)
     data = payload.get("data")
@@ -142,7 +154,7 @@ async def to_image_response(
             raise ValueError("上游返回了不支持的图片数据结构")
 
         b64_json = item.get("b64_json")
-        url = item.get("url")
+        url = item.get("url") or item.get("image") or item.get("image_url")
         mime_type = item.get("mime_type") or (
             _mime_from_base64(b64_json, fallback_mime) if b64_json else fallback_mime
         )
@@ -173,6 +185,8 @@ async def to_image_response(
         usage = usage.model_dump(exclude_none=True)
     return ImageResponse(
         model=model,
+        provider=provider_for_model(model, settings),
+        prompt_profile=prompt_profile,
         created=payload.get("created") or int(time.time()),
         images=images,
         background=payload.get("background"),
@@ -194,9 +208,20 @@ async def generate_images(
     request: GenerateRequest,
 ) -> ImageResponse:
     model = request.model or settings.image_model
+    effective_prompt = build_ui_prompt(
+        request.prompt,
+        profile=request.prompt_profile,
+        asset_type=request.asset_type,
+        platform=request.platform,
+        visual_style=request.visual_style,
+        brand_palette=request.brand_palette,
+        composition=request.composition,
+        content_density=request.content_density,
+        text_policy=request.text_policy,
+    )
     validate_image_options(
         model=model,
-        prompt=request.prompt,
+        prompt=effective_prompt,
         n=request.n,
         size=request.size,
         quality=request.quality,
@@ -208,18 +233,32 @@ async def generate_images(
 
     kwargs: dict[str, Any] = {
         "model": model,
-        "prompt": request.prompt,
+        "prompt": effective_prompt,
         "n": request.n,
-        "size": request.size,
     }
+    if request.size != "auto" or is_gpt_image_model(model):
+        kwargs["size"] = request.size
     if request.user:
         kwargs["user"] = request.user
-    if is_gpt_image_model(model):
+    if is_qwen_model(model):
+        result = await _generate_qwen(settings, request, effective_prompt)
+    elif is_gpt_image_model(model):
         kwargs["quality"] = request.quality
         for name in ("background", "output_format", "output_compression", "moderation"):
             value = getattr(request, name)
             if value is not None:
                 kwargs[name] = value
+    elif is_seedream_model(model):
+        kwargs["response_format"] = "url"
+        extra_body = {
+            key: value
+            for key, value in (("seed", request.seed), ("watermark", request.watermark))
+            if value is not None
+        }
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        async with _generation_slots(settings.max_concurrent_generations):
+            result = await client.images.generate(**kwargs)
     else:
         if request.quality != "auto":
             kwargs["quality"] = request.quality
@@ -227,9 +266,56 @@ async def generate_images(
         if model == "dall-e-3" and request.style:
             kwargs["style"] = request.style
 
+        if request.seed is not None or request.negative_prompt is not None:
+            kwargs["extra_body"] = {
+                key: value
+                for key, value in (("seed", request.seed), ("negative_prompt", request.negative_prompt))
+                if value is not None
+            }
+        async with _generation_slots(settings.max_concurrent_generations):
+            result = await client.images.generate(**kwargs)
+    if is_gpt_image_model(model):
+        async with _generation_slots(settings.max_concurrent_generations):
+            result = await client.images.generate(**kwargs)
+    return await to_image_response(model, result, settings, request.output_format, request.prompt_profile)
+
+
+async def _generate_qwen(settings: Settings, request: GenerateRequest, prompt: str) -> dict[str, Any]:
+    if not settings.qwen_api_key:
+        raise ValueError("未配置 QWEN_API_KEY 或 DASHSCOPE_API_KEY")
+    parameters: dict[str, Any] = {
+        "n": request.n,
+        "prompt_extend": request.prompt_extend if request.prompt_extend is not None else False,
+        "watermark": request.watermark if request.watermark is not None else False,
+    }
+    if request.size != "auto":
+        parameters["size"] = request.size.replace("x", "*")
+    for key in ("negative_prompt", "seed"):
+        value = getattr(request, key)
+        if value is not None:
+            parameters[key] = value
+    payload = {
+        "model": request.model or settings.image_model,
+        "input": {"messages": [{"role": "user", "content": [{"text": prompt}]}]},
+        "parameters": parameters,
+    }
     async with _generation_slots(settings.max_concurrent_generations):
-        result = await client.images.generate(**kwargs)
-    return await to_image_response(model, result, settings, request.output_format)
+        async with httpx.AsyncClient(timeout=settings.request_timeout) as http:
+            response = await http.post(
+                settings.qwen_base_url,
+                headers={"Authorization": f"Bearer {settings.qwen_api_key}"},
+                json=payload,
+            )
+            response.raise_for_status()
+    body = response.json()
+    images = []
+    for choice in body.get("output", {}).get("choices", []):
+        for content in choice.get("message", {}).get("content", []):
+            if content.get("image"):
+                images.append({"url": content["image"], "revised_prompt": content.get("actual_prompt")})
+    if not images:
+        raise ValueError("Qwen 上游响应中未找到图片数据")
+    return {"data": images, "usage": body.get("usage"), "size": request.size}
 
 
 async def edit_images(
@@ -248,11 +334,32 @@ async def edit_images(
     input_fidelity: str | None,
     user: str | None,
     model: str | None,
+    prompt_profile: PromptProfile = "ui_pro",
+    asset_type: UIAssetType = "auto",
+    platform: UIPlatform = "web",
+    visual_style: str | None = None,
+    brand_palette: str | None = None,
+    composition: str | None = None,
+    content_density: ContentDensity = "balanced",
+    text_policy: TextPolicy = "no_text",
 ) -> ImageResponse:
     resolved_model = model or settings.image_model
+    if is_qwen_model(resolved_model) or is_seedream_model(resolved_model):
+        raise ValueError(f"{resolved_model} 当前仅支持生成，不支持此编辑接口")
+    effective_prompt = build_ui_prompt(
+        prompt,
+        profile=prompt_profile,
+        asset_type=asset_type,
+        platform=platform,
+        visual_style=visual_style,
+        brand_palette=brand_palette,
+        composition=composition,
+        content_density=content_density,
+        text_policy=text_policy,
+    )
     validate_image_options(
         model=resolved_model,
-        prompt=prompt,
+        prompt=effective_prompt,
         n=n,
         size=size,
         quality=quality,  # type: ignore[arg-type]
@@ -270,7 +377,7 @@ async def edit_images(
 
     kwargs: dict[str, Any] = {
         "model": resolved_model,
-        "prompt": prompt,
+        "prompt": effective_prompt,
         "image": images if len(images) > 1 else images[0],
         "n": n,
         "size": size,
@@ -296,4 +403,4 @@ async def edit_images(
 
     async with _generation_slots(settings.max_concurrent_generations):
         result = await client.images.edit(**kwargs)
-    return await to_image_response(resolved_model, result, settings, output_format)
+    return await to_image_response(resolved_model, result, settings, output_format, prompt_profile)

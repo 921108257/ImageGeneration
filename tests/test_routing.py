@@ -24,6 +24,9 @@ class ProviderRoutingTests(unittest.TestCase):
             with self.subTest(size=size):
                 self.assertEqual(resolve_api_key("gpt-image-2", size, self.settings), "default-key")
 
+        self.settings.openai_api_key_1k = None
+        self.assertEqual(resolve_api_key("gpt-image-2", "512x512", self.settings), "default-key")
+
     def test_routes_qwen_and_seedream_to_their_own_credentials(self) -> None:
         cases = (
             ("qwen-image-2.0-pro", "qwen", "qwen-key", "https://qwen.example/generate"),

@@ -225,13 +225,16 @@ curl http://127.0.0.1:8000/v1/images/edit \
     "gpt-image-2-assets": {
       "type": "http",
       "url": "https://image.example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_SERVICE_API_KEY"
+      "bearer_token_env_var": "GPT_IMAGE_2_SERVICE_API_KEY",
+      "http_headers": {
+        "Host": "image.example.com:443"
       }
     }
   }
 }
 ```
+
+将 `GPT_IMAGE_2_SERVICE_API_KEY` 设置为服务端的 `SERVICE_API_KEY`（或 `API_KEY`）值；若反向代理使用其他公开端口，按实际域名和端口替换 `Host`。
 
 仓库中的 `plugins/gpt-image-2-assets` 是可安装的本地 Plugin，默认连接本机 MCP。部署到服务器后，把它的 `.mcp.json` 替换为 `plugins/gpt-image-2-assets/.mcp.remote.example.json` 的远程 URL，并配置 `GPT_IMAGE_2_SERVICE_API_KEY` 环境变量。
 

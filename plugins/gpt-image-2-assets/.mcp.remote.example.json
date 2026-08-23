@@ -3,7 +3,10 @@
     "gpt-image-2-assets": {
       "type": "http",
       "url": "https://image.example.com/mcp",
-      "bearer_token_env_var": "GPT_IMAGE_2_SERVICE_API_KEY"
+      "bearer_token_env_var": "GPT_IMAGE_2_SERVICE_API_KEY",
+      "http_headers": {
+        "Host": "image.example.com:443"
+      }
     }
   }
 }

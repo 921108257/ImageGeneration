@@ -1,6 +1,6 @@
 # GPT Image 2 界面资源生成服务
 
-这是一个可本地或服务器部署的多模型图像资源服务，同时提供 REST、MCP Streamable HTTP、Codex Plugin 和前端资产 Skill。默认模型为 `gpt-image-2`，面向前端工程师生成可直接落地的 UI 背景、插图、图标、纹理、产品 mockup 和其他位图资源。
+这是一个可本地或服务器部署的多模型图像资源服务，同时提供 REST、MCP Streamable HTTP、Claude Code 与 Codex 插件和前端资产 Skill。默认模型为 `gpt-image-2`，面向前端工程师生成可直接落地的 UI 背景、插图、图标、纹理、产品 mockup 和其他位图资源，并内置“设计语言 → 静态界面图 → 审核 → 界面构建 → 资源生成”的设计优先工作流。
 
 ## 能力
 
@@ -8,6 +8,9 @@
 - `POST /v1/images/edit`：1-16 张参考图编辑或组合
 - `POST /mcp`：MCP Streamable HTTP，暴露 `generate_ui_asset` 和 `edit_ui_asset`
 - `GET /v1/models`：查看已配置的模型提供商
+- `ui-design-studio` Skill：设计优先流水线，先定设计语言与版式，再出整屏静态界面图交用户审核，通过后才构建界面并生成所需背景与图标
+- `asset_type=interface_mockup`：生成整屏平面界面稿，用于构建前的方向审核
+- 内容感知图标切分：基于 alpha 连通域检测图标位置，容忍生成图的不均匀间距，避免固定网格切坏图标
 - GPT Image 2 自定义尺寸、输出格式、JPEG/WebP 压缩、质量、moderation
 - GPT Image 2 1K 专用 Key 路由：存在 `OPENAI_API_KEY_1K` 时，明确指定不超过 `IMAGE_1K_MAX_EDGE` 的请求优先使用它，否则回退默认 OpenAI Key
 - Qwen Image 原生 DashScope 生成适配、Seedream Ark OpenAI 兼容适配
@@ -143,7 +146,7 @@ curl http://127.0.0.1:8000/v1/images/generate \
 | `user` | 稳定、非敏感的终端用户 ID，用于安全监控 |
 | `model` | 可覆盖服务端默认模型 |
 | `prompt_profile` | `ui_pro` 或 `raw`；默认把短需求扩展为专业 UI 资产 brief |
-| `asset_type` | `hero_background/empty_state/illustration/icon/logo/texture/product_mockup/avatar/pattern` |
+| `asset_type` | `hero_background/empty_state/illustration/icon/logo/texture/product_mockup/interface_mockup/avatar/pattern` |
 | `platform` | `web/mobile/desktop/cross_platform` |
 | `visual_style` / `brand_palette` / `composition` | 可选视觉系统、材质和构图约束 |
 | `content_density` | `airy/balanced/dense` |
@@ -205,17 +208,67 @@ curl http://127.0.0.1:8000/v1/images/edit \
 - `ResourceLink`：启用 OSS 或上游返回 URL 时的图片链接
 - `structuredContent`：模型、尺寸、格式、usage 和图片索引
 
+### 协议版本
+
+**MCP 协议版本是日期字符串，不是语义化版本；不存在“MCP 协议 3.0”。** 代码里的 `3.0.0` 是本服务的
+实现版本（`SERVER_VERSION`），与协议无关。当前支持的协议版本：
+
+| 类别 | 版本 | 说明 |
+|---|---|---|
+| 最新 | `2026-07-28` | 无状态、按请求携带信封（`params._meta` + `mcp-method` 请求头） |
+| 握手 | `2025-11-25`、`2025-06-18`、`2025-03-26`、`2024-11-05` | 通过 `initialize` 协商 |
+
+SDK 内部完成协商，`streamable_http_app()` 没有可以固定协议版本的参数。`GET /health` 与
+`list_ui_models` 都会返回 `protocol_versions`，便于确认部署实际支持的版本。
+`tests/test_protocol.py` 会锁定 `2026-07-28`，依赖降级时立即失败。
+
+用原始 HTTP 调用最新协议时，必须同时提供请求头和信封（真实 SDK 客户端会自动携带）：
+
+```bash
+curl http://127.0.0.1:8000/mcp \
+  -H "Authorization: Bearer $IMAGE_SERVICE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "mcp-method: tools/list" \
+  -d '{
+    "jsonrpc": "2.0", "id": 1, "method": "tools/list",
+    "params": {"_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }}
+  }'
+```
+
 工具：
 
 | 工具 | 用途 |
 |---|---|
-| `list_ui_models` | 查看已配置提供商、模型及 generate/edit 能力，不调用上游 |
+| `list_ui_models` | 查看已配置提供商、模型、能力与协议版本，不调用上游 |
 | `generate_ui_asset` | 文本生成 1-10 张界面位图资源 |
 | `edit_ui_asset` | 用 base64/data URL 参考图编辑或组合资源 |
 
 ### 前端产出工作流
 
-插件内的 [gpt-image-2-assets Skill](./plugins/gpt-image-2-assets/skills/gpt-image-2-assets/SKILL.md) 负责把产品上下文、平台、资产类型、留白、材质和文字策略组织成可执行的提示词。它要求生成结果落盘到前端项目，不把短期 Provider URL 留作运行时依赖；图标还要经过 `rembg` 去底并校验 RGBA alpha。`ui-ux-asset-pipeline` 可进一步用 `split_icon_sheet.py` 拆分一致的图标族。
+插件包含三个 Skill，覆盖从设计到落地的完整链路：
+
+| Skill | 职责 |
+|---|---|
+| [ui-design-studio](./plugins/gpt-image-2-assets/skills/ui-design-studio/SKILL.md) | 设计语言 → 静态界面图 → 用户审核 → 界面构建 → 资源生成 |
+| [gpt-image-2-assets](./plugins/gpt-image-2-assets/skills/gpt-image-2-assets/SKILL.md) | 把产品上下文、平台、资产类型、留白、材质和文字策略组织成可执行提示词 |
+| [ui-ux-asset-pipeline](./plugins/gpt-image-2-assets/skills/ui-ux-asset-pipeline/SKILL.md) | `rembg` 去底、内容感知图标切分、集成与校验 |
+
+`ui-design-studio` 强制“先定设计语言，再出图”：先用 `ui-ux-pro-max` 与 `frontend-design`
+确定版式、配色、字体与签名元素并落盘到 `design-system/<slug>/MASTER.md`，再用
+`asset_type=interface_mockup` 生成整屏静态界面图交给用户审核；不满意就带着具体意见回到第一步修改
+设计语言并生成 `v<N+1>`，通过后才开始构建界面，并按需生成背景与图标资源。
+
+静态界面图是**审阅用的美术方向稿，不是实现规范**：位图模型无法可靠渲染文字与细小控件，
+构建阶段的颜色与字号一律取自 `MASTER.md`，而不是去像素级比对图片。
+
+图标族生成为一张 sheet 后经 `rembg` 去底，再用 `split_icon_sheet.py` 切分。切分默认使用
+`--layout auto` 的内容感知检测（基于 alpha 连通域），因此可以容忍生成图常见的不均匀间距与偏移；
+固定网格只在 sheet 确实规整时用 `--layout grid` 指定。务必先跑 `--dry-run` 确认检测数量再写盘。
 
 远程 URL 和服务器文件路径不会被 `edit_ui_asset` 接受，这避免了 SSRF 和越权读取服务器文件。远程 MCP 配置示例：
 
@@ -236,7 +289,26 @@ curl http://127.0.0.1:8000/v1/images/edit \
 
 将 `GPT_IMAGE_2_SERVICE_API_KEY` 设置为服务端的 `SERVICE_API_KEY`（或 `API_KEY`）值；若反向代理使用其他公开端口，按实际域名和端口替换 `Host`。
 
-仓库中的 `plugins/gpt-image-2-assets` 是可安装的本地 Plugin，默认连接本机 MCP。部署到服务器后，把它的 `.mcp.json` 替换为 `plugins/gpt-image-2-assets/.mcp.remote.example.json` 的远程 URL，并配置 `GPT_IMAGE_2_SERVICE_API_KEY` 环境变量。
+仓库中的 `plugins/gpt-image-2-assets` 是可安装的本地 Plugin，同时支持 Claude Code 和 Codex，默认连接本机 MCP。
+
+**Claude Code**：仓库根目录提供 `.claude-plugin/marketplace.json`，插件自身提供
+`.claude-plugin/plugin.json`；`.mcp.json` 与 `skills/` 会被自动发现。
+
+```
+/plugin marketplace add .
+/plugin install gpt-image-2-assets@image-generation
+```
+
+**Codex**：插件提供 `.codex-plugin/plugin.json`（通过 `mcpServers` 指向同一份 `.mcp.json`），
+每个 Skill 另带 `agents/openai.yaml`。
+
+```powershell
+.\scripts\install_codex.ps1
+```
+
+两个平台共用同一份 `.mcp.json` 和同一套 Skill。部署到服务器后，把 `.mcp.json` 替换为
+`plugins/gpt-image-2-assets/.mcp.remote.example.json` 的远程 URL，并配置
+`GPT_IMAGE_2_SERVICE_API_KEY` 环境变量。
 
 ## Docker 部署
 

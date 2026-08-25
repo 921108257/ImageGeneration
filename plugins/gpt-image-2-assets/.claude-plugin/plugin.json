@@ -1,0 +1,10 @@
+{
+  "name": "gpt-image-2-assets",
+  "description": "Design-first UI pipeline: establish a design language, generate a static mockup for approval, then build the interface and produce every background and icon through a local or hosted multi-model MCP image service (GPT Image 2, Qwen Image, Seedream). Bundles the ui-design-studio, gpt-image-2-assets, and ui-ux-asset-pipeline skills. Connects to the MCP server declared in .mcp.json (defaults to http://127.0.0.1:8000/mcp).",
+  "version": "3.0.0",
+  "author": {
+    "name": "ImageGeneration contributors"
+  },
+  "license": "MIT",
+  "keywords": ["ui", "ux", "frontend", "design", "image-generation", "gpt-image-2", "qwen", "seedream", "mcp"]
+}

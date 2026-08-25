@@ -11,6 +11,7 @@ UIAssetType = Literal[
     "logo",
     "texture",
     "product_mockup",
+    "interface_mockup",
     "avatar",
     "pattern",
 ]
@@ -53,6 +54,14 @@ def build_ui_prompt(
         "logo": "Use a simple distinctive mark with disciplined geometry, scalable edges, and no accidental typography or mockup context.",
         "texture": "Keep the texture tileable or crop-safe, controlled in contrast, and subordinate to readable foreground UI.",
         "product_mockup": "Show the product state clearly and inspectably, with realistic perspective and enough context to communicate the feature.",
+        "interface_mockup": (
+            "Render one complete flat screen design filling the whole frame at the requested aspect ratio, "
+            "straight-on with no device bezel, perspective, shadow, or desk scene. Show the real layout "
+            "structure the brief describes: navigation, section order, grouping, alignment grid, component "
+            "shapes, and the relative weight of each region. Follow the supplied palette and type direction "
+            "exactly. Treat any lettering as indicative placeholder blocking rather than final copy, and keep "
+            "it sparse and plausible instead of dense paragraphs."
+        ),
         "avatar": "Use a clean recognizable subject with a stable face-safe crop and consistent framing for repeated use.",
         "pattern": "Use repeatable geometry with an intentional rhythm, no visible seams, and contrast low enough for foreground content.",
         "auto": "Choose the composition and detail level appropriate for the requested frontend asset role.",

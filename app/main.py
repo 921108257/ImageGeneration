@@ -10,7 +10,7 @@ from openai import APIConnectionError, APIError, BadRequestError, RateLimitError
 
 from .config import Settings, get_settings
 from .image_service import detect_image_mime, edit_images, generate_images, named_image
-from .mcp_server import mcp_http_app
+from .mcp_server import SERVER_VERSION, mcp_http_app, protocol_versions
 from .openai_client import configured_models, get_client
 from .schemas import (
     GenerateRequest,
@@ -41,7 +41,7 @@ app = FastAPI(
         "- REST 多图编辑：`POST /v1/images/edit`\n"
         "- MCP Streamable HTTP：`POST /mcp`"
     ),
-    version="3.0.0",
+    version=SERVER_VERSION,
     lifespan=lifespan,
 )
 app.add_middleware(RequestGuardMiddleware)
@@ -130,6 +130,8 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> dict:
         "status": "ok",
         "model": settings.image_model,
         "mcp_endpoint": "/mcp",
+        "server_version": SERVER_VERSION,
+        "protocol_versions": protocol_versions(),
         "authentication_enabled": bool(settings.service_api_key),
         "providers": {
             "openai": bool(settings.openai_api_key),

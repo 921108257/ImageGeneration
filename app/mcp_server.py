@@ -5,6 +5,11 @@ from mcp import types
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp_types.version import (
+    HANDSHAKE_PROTOCOL_VERSIONS,
+    LATEST_PROTOCOL_VERSION,
+    MODERN_PROTOCOL_VERSIONS,
+)
 from openai import APIError
 from pydantic import Field, ValidationError
 
@@ -12,6 +17,26 @@ from .config import get_settings
 from .image_service import decode_image_input, edit_images, generate_images
 from .openai_client import configured_models, get_client
 from .schemas import GenerateRequest, ImageResponse
+
+
+SERVER_VERSION = "3.0.0"
+"""Server implementation version. This is not the MCP protocol version.
+
+MCP protocol revisions are date strings, not semver: there is no protocol "3.0". The
+newest revision is LATEST_PROTOCOL_VERSION (2026-07-28), which uses the stateless
+per-request envelope; older clients still negotiate one of HANDSHAKE_PROTOCOL_VERSIONS
+through initialize. The SDK performs that negotiation internally, so the transport below
+does not pin a version.
+"""
+
+
+def protocol_versions() -> dict:
+    """Protocol revisions this build speaks, for /health and list_ui_models."""
+    return {
+        "latest": LATEST_PROTOCOL_VERSION,
+        "modern": list(MODERN_PROTOCOL_VERSIONS),
+        "handshake": list(HANDSHAKE_PROTOCOL_VERSIONS),
+    }
 
 
 settings = get_settings()
@@ -24,7 +49,7 @@ mcp = MCPServer(
         "production UI assets and raw only when the caller already supplies a complete art-direction brief. "
         "GPT Image 2 does not support transparent backgrounds. Save provider URLs into the target project."
     ),
-    version="3.0.0",
+    version=SERVER_VERSION,
 )
 
 _TOOL_ANNOTATIONS = types.ToolAnnotations(
@@ -46,6 +71,8 @@ async def list_ui_models() -> types.CallToolResult:
     payload = {
         "models": configured_models(settings),
         "small_image_key_enabled": bool(settings.openai_api_key_1k),
+        "server_version": SERVER_VERSION,
+        "protocol_versions": protocol_versions(),
     }
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
@@ -145,7 +172,7 @@ async def generate_ui_asset(
     user: Annotated[str | None, Field(max_length=256)] = None,
     model: str | None = None,
     prompt_profile: Literal["ui_pro", "raw"] = "ui_pro",
-    asset_type: Literal["auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "avatar", "pattern"] = "auto",
+    asset_type: Literal["auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "interface_mockup", "avatar", "pattern"] = "auto",
     platform: Literal["web", "mobile", "desktop", "cross_platform"] = "web",
     visual_style: str | None = None,
     brand_palette: str | None = None,
@@ -216,7 +243,7 @@ async def edit_ui_asset(
     user: Annotated[str | None, Field(max_length=256)] = None,
     model: str | None = None,
     prompt_profile: Literal["ui_pro", "raw"] = "ui_pro",
-    asset_type: Literal["auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "avatar", "pattern"] = "auto",
+    asset_type: Literal["auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "interface_mockup", "avatar", "pattern"] = "auto",
     platform: Literal["web", "mobile", "desktop", "cross_platform"] = "web",
     visual_style: str | None = None,
     brand_palette: str | None = None,

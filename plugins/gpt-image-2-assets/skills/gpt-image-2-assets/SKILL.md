@@ -9,6 +9,8 @@ metadata:
 
 Use the `generate_ui_asset` MCP tool for new assets and `edit_ui_asset` for reference-driven edits. The service supports local MCP at `http://127.0.0.1:8000/mcp` and hosted Streamable HTTP endpoints.
 
+For building a whole interface — design language, an approved static mockup, then the built UI with its generated assets — use [ui-design-studio](../ui-design-studio/SKILL.md), which drives this tool through that full pipeline. This skill covers generating individual assets well.
+
 ## Workflow
 
 1. Inspect the target frontend stack, existing design tokens, image dimensions, and where the asset will be integrated.

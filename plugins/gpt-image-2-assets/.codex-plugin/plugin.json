@@ -1,24 +1,25 @@
 {
   "name": "gpt-image-2-assets",
-  "version": "0.2.0",
-  "description": "Professional UI asset generation through a local or hosted multi-model MCP service.",
+  "version": "3.0.0",
+  "description": "Design-first UI pipeline and professional UI asset generation through a local or hosted multi-model MCP service.",
   "author": {
     "name": "ImageGeneration contributors"
   },
   "license": "MIT",
-  "keywords": ["ui", "frontend", "image-generation", "gpt-image-2", "qwen", "seedream", "mcp"],
+  "keywords": ["ui", "ux", "frontend", "design", "image-generation", "gpt-image-2", "qwen", "seedream", "mcp"],
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "GPT Image 2 Assets",
-    "shortDescription": "Generate production-ready UI assets.",
-    "longDescription": "Connects Codex to a local or hosted MCP image service with professional UI prompting, GPT Image 2, Qwen Image, and Seedream model routing.",
+    "shortDescription": "Design, review, and build UI with generated assets.",
+    "longDescription": "Connects Codex to a local or hosted MCP image service with professional UI prompting, GPT Image 2, Qwen Image, and Seedream model routing. Includes ui-design-studio for the design-language-to-approved-mockup-to-built-UI pipeline, and ui-ux-asset-pipeline for background removal and content-aware icon sheet splitting.",
     "developerName": "ImageGeneration contributors",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
+      "Design and build this screen: establish the design language, show me a mockup to approve, then implement it.",
       "Use the UI asset skill to create a polished empty-state illustration.",
       "Generate a responsive hero background with quiet space for product copy.",
-      "Create a coherent icon family for this frontend feature."
+      "Create a coherent icon family for this frontend feature and split it into transparent PNGs."
     ]
   }
 }

@@ -1,0 +1,25 @@
+{
+  "name": "image-generation",
+  "id": "image-generation",
+  "owner": {
+    "name": "ImageGeneration contributors"
+  },
+  "metadata": {
+    "description": "Design-first UI pipeline plus multi-model image asset generation over MCP",
+    "version": "3.0.0"
+  },
+  "plugins": [
+    {
+      "name": "gpt-image-2-assets",
+      "source": "./plugins/gpt-image-2-assets",
+      "description": "Design language, an approved static mockup, then a built UI with generated backgrounds and icons through a local or hosted GPT Image 2 / Qwen / Seedream MCP service.",
+      "version": "3.0.0",
+      "author": {
+        "name": "ImageGeneration contributors"
+      },
+      "keywords": ["ui", "ux", "frontend", "design", "image-generation", "gpt-image-2", "qwen", "seedream", "mcp"],
+      "category": "design",
+      "strict": false
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "UI Design Studio"
+  short_description: "Design language, approved mockup, then a built UI with generated assets"
+  default_prompt: "Use $ui-design-studio to design, review, and build this interface with generated assets."
+
+policy:
+  allow_implicit_invocation: true

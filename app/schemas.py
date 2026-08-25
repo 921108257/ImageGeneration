@@ -156,7 +156,8 @@ class GenerateRequest(BaseModel):
     model: str | None = Field(None, min_length=1, description="覆盖默认图像模型")
     prompt_profile: Literal["ui_pro", "raw"] = Field("ui_pro", description="专业 UI 提示词增强或原始模式")
     asset_type: Literal[
-        "auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture", "product_mockup", "avatar", "pattern"
+        "auto", "hero_background", "empty_state", "illustration", "icon", "logo", "texture",
+        "product_mockup", "interface_mockup", "avatar", "pattern"
     ] = Field("auto", description="前端资产类型")
     platform: Literal["web", "mobile", "desktop", "cross_platform"] = Field("web", description="目标平台")
     visual_style: str | None = Field(None, max_length=1000, description="视觉风格")

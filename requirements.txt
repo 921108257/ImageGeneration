@@ -2,7 +2,10 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.31,<1
 openai>=2.48,<4
 httpx>=0.28,<1
-mcp>=2,<3
+# MCP protocol revisions are date strings, not semver; there is no protocol "3.0".
+# SDK 2.0 is the first release that speaks the newest revision, 2026-07-28 (the stateless
+# per-request envelope), while still negotiating 2025-11-25 and earlier via initialize.
+mcp>=2.0,<3
 python-multipart>=0.0.9,<1
 pydantic>=2.12,<3
 pydantic-settings>=2.5,<3
